@@ -1,290 +1,292 @@
-from collections import defaultdict
-from pathlib import Path
-import sqlite3
-
 import streamlit as st
-import altair as alt
-import pandas as pd
+import numpy as np
+from PIL import Image
+import io
+import os
 
-
-# Set the title and favicon that appear in the Browser's tab bar.
+# ─── Page config ────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Inventory tracker",
-    page_icon=":shopping_bags:",  # This is an emoji shortcode. Could be a URL too.
+    page_title="GlaucomaNet · Eye Disease Detector",
+    page_icon="👁️",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
+# ─── Custom CSS ─────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+    .stApp { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); }
+    .main-card {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 20px;
+        padding: 2rem;
+        backdrop-filter: blur(10px);
+        margin-bottom: 1.5rem;
+    }
+    .result-glaucoma {
+        background: linear-gradient(135deg, rgba(239,68,68,0.25), rgba(185,28,28,0.15));
+        border: 1px solid rgba(239,68,68,0.5);
+        border-radius: 16px;
+        padding: 1.5rem;
+        text-align: center;
+    }
+    .result-normal {
+        background: linear-gradient(135deg, rgba(34,197,94,0.25), rgba(21,128,61,0.15));
+        border: 1px solid rgba(34,197,94,0.5);
+        border-radius: 16px;
+        padding: 1.5rem;
+        text-align: center;
+    }
+    .metric-pill {
+        display: inline-block;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 999px;
+        padding: 0.3rem 1rem;
+        font-size: 0.85rem;
+        color: #e0e0e0;
+        margin: 0.2rem;
+    }
+    .conf-track {
+        background: rgba(255,255,255,0.1);
+        border-radius: 999px;
+        height: 12px;
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+    h1, h2, h3 { color: #ffffff !important; }
+    p, li, label { color: #cbd5e1 !important; }
+    .stMarkdown p { color: #cbd5e1; }
+    [data-testid="stFileUploadDropzone"] {
+        background: rgba(255,255,255,0.04) !important;
+        border: 2px dashed rgba(148,163,184,0.4) !important;
+        border-radius: 14px !important;
+    }
+    section[data-testid="stSidebar"] {
+        background: rgba(15, 12, 41, 0.85);
+        border-right: 1px solid rgba(255,255,255,0.08);
+    }
+    .stButton > button {
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 0.6rem 2rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        width: 100%;
+        transition: opacity 0.2s;
+    }
+    .stButton > button:hover { opacity: 0.85; }
+    hr { border-color: rgba(255,255,255,0.1) !important; }
+</style>
+""", unsafe_allow_html=True)
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
 
+# ─── Sidebar ─────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 👁️ GlaucomaNet")
+    st.markdown("**AI-powered glaucoma screening** from retinal fundus images.")
+    st.divider()
 
-def connect_db():
-    """Connects to the sqlite database."""
-
-    DB_FILENAME = Path(__file__).parent / "inventory.db"
-    db_already_exists = DB_FILENAME.exists()
-
-    conn = sqlite3.connect(DB_FILENAME)
-    db_was_just_created = not db_already_exists
-
-    return conn, db_was_just_created
-
-
-def initialize_data(conn):
-    """Initializes the inventory table with some data."""
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS inventory (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_name TEXT,
-            price REAL,
-            units_sold INTEGER,
-            units_left INTEGER,
-            cost_price REAL,
-            reorder_point INTEGER,
-            description TEXT
-        )
-        """
+    st.markdown("### 📂 Model")
+    model_path = st.text_input(
+        "Model file path (.h5 / .keras)",
+        value="combine_cnn.h5",
+        help="Path to your saved Keras model file",
     )
 
-    cursor.execute(
-        """
-        INSERT INTO inventory
-            (item_name, price, units_sold, units_left, cost_price, reorder_point, description)
-        VALUES
-            -- Beverages
-            ('Bottled Water (500ml)', 1.50, 115, 15, 0.80, 16, 'Hydrating bottled water'),
-            ('Soda (355ml)', 2.00, 93, 8, 1.20, 10, 'Carbonated soft drink'),
-            ('Energy Drink (250ml)', 2.50, 12, 18, 1.50, 8, 'High-caffeine energy drink'),
-            ('Coffee (hot, large)', 2.75, 11, 14, 1.80, 5, 'Freshly brewed hot coffee'),
-            ('Juice (200ml)', 2.25, 11, 9, 1.30, 5, 'Fruit juice blend'),
-
-            -- Snacks
-            ('Potato Chips (small)', 2.00, 34, 16, 1.00, 10, 'Salted and crispy potato chips'),
-            ('Candy Bar', 1.50, 6, 19, 0.80, 15, 'Chocolate and candy bar'),
-            ('Granola Bar', 2.25, 3, 12, 1.30, 8, 'Healthy and nutritious granola bar'),
-            ('Cookies (pack of 6)', 2.50, 8, 8, 1.50, 5, 'Soft and chewy cookies'),
-            ('Fruit Snack Pack', 1.75, 5, 10, 1.00, 8, 'Assortment of dried fruits and nuts'),
-
-            -- Personal Care
-            ('Toothpaste', 3.50, 1, 9, 2.00, 5, 'Minty toothpaste for oral hygiene'),
-            ('Hand Sanitizer (small)', 2.00, 2, 13, 1.20, 8, 'Small sanitizer bottle for on-the-go'),
-            ('Pain Relievers (pack)', 5.00, 1, 5, 3.00, 3, 'Over-the-counter pain relief medication'),
-            ('Bandages (box)', 3.00, 0, 10, 2.00, 5, 'Box of adhesive bandages for minor cuts'),
-            ('Sunscreen (small)', 5.50, 6, 5, 3.50, 3, 'Small bottle of sunscreen for sun protection'),
-
-            -- Household
-            ('Batteries (AA, pack of 4)', 4.00, 1, 5, 2.50, 3, 'Pack of 4 AA batteries'),
-            ('Light Bulbs (LED, 2-pack)', 6.00, 3, 3, 4.00, 2, 'Energy-efficient LED light bulbs'),
-            ('Trash Bags (small, 10-pack)', 3.00, 5, 10, 2.00, 5, 'Small trash bags for everyday use'),
-            ('Paper Towels (single roll)', 2.50, 3, 8, 1.50, 5, 'Single roll of paper towels'),
-            ('Multi-Surface Cleaner', 4.50, 2, 5, 3.00, 3, 'All-purpose cleaning spray'),
-
-            -- Others
-            ('Lottery Tickets', 2.00, 17, 20, 1.50, 10, 'Assorted lottery tickets'),
-            ('Newspaper', 1.50, 22, 20, 1.00, 5, 'Daily newspaper')
-        """
+    st.divider()
+    st.markdown("### ⚙️ Settings")
+    img_size = st.select_slider(
+        "Input resolution",
+        options=[128, 192, 224, 256],
+        value=256,
+        help="Must match the size used during training (default 256×256)",
     )
-    conn.commit()
+    show_debug = st.checkbox("Show debug info", value=False)
+
+    st.divider()
+    st.markdown("### ℹ️ About")
+    st.markdown("""
+Trained on three public fundus datasets:
+- **DRISHTI** – 101 images (IIIT Hyderabad)
+- **RIM-ONE DL** – 485 images (3 Spanish hospitals)
+- **ACRIMA** – 705 images (FISABIO Valencia)
+
+Architecture: Custom CNN · Input: 256×256 RGB · Output: Glaucoma / Normal
+""")
+    st.caption("For research purposes only. Not a medical device.")
 
 
-def load_data(conn):
-    """Loads the inventory data from the database."""
-    cursor = conn.cursor()
-
+# ─── Model loader (cached) ───────────────────────────────────────────────────
+@st.cache_resource(show_spinner="Loading model weights…")
+def load_cnn_model(path: str):
+    """Load the Keras model. Returns (model, error_string)."""
     try:
-        cursor.execute("SELECT * FROM inventory")
-        data = cursor.fetchall()
-    except:
-        return None
+        from tensorflow.keras.models import load_model  # type: ignore
+        if not os.path.exists(path):
+            return None, f"File not found: `{path}`"
+        model = load_model(path)
+        return model, None
+    except ImportError:
+        return None, "TensorFlow is not installed. Run `pip install tensorflow`."
+    except Exception as e:
+        return None, str(e)
 
-    df = pd.DataFrame(
-        data,
-        columns=[
-            "id",
-            "item_name",
-            "price",
-            "units_sold",
-            "units_left",
-            "cost_price",
-            "reorder_point",
-            "description",
-        ],
+
+# ─── Prediction helper ───────────────────────────────────────────────────────
+def predict(model, pil_image: Image.Image, target_size: int):
+    """Return (label, confidence_glaucoma, confidence_normal)."""
+    from tensorflow.keras.preprocessing.image import img_to_array  # type: ignore
+    img = pil_image.convert("RGB").resize((target_size, target_size))
+    arr = img_to_array(img) / 255.0
+    arr = np.expand_dims(arr, axis=0)
+    probs = model.predict(arr, verbose=0)[0]   # shape: (2,)
+    label_idx = int(np.argmax(probs))
+    # Class order from ImageDataGenerator (alphabetical): glaucoma=0, normal=1
+    labels = ["Glaucoma", "Normal"]
+    return labels[label_idx], float(probs[0]), float(probs[1])
+
+
+# ─── Header ──────────────────────────────────────────────────────────────────
+col_icon, col_title = st.columns([1, 10])
+with col_icon:
+    st.markdown("<div style='font-size:3.5rem;margin-top:0.3rem'>👁️</div>",
+                unsafe_allow_html=True)
+with col_title:
+    st.markdown("# GlaucomaNet")
+    st.markdown("<p style='margin-top:-0.8rem;color:#94a3b8;font-size:1.05rem'>"
+                "Retinal Fundus Image Classifier · CNN-based Glaucoma Detection</p>",
+                unsafe_allow_html=True)
+
+st.divider()
+
+# ─── Load model ──────────────────────────────────────────────────────────────
+model, model_err = load_cnn_model(model_path)
+
+if model_err:
+    st.warning(f"⚠️ Model not loaded — {model_err}")
+    st.info(
+        "Place your `combine_cnn.h5` file in the same directory as this script, "
+        "or adjust the path in the sidebar. The UI is fully functional once the model is loaded."
     )
+    model = None
+else:
+    st.success("✅ Model loaded successfully")
+    if show_debug:
+        st.write(f"**Input shape:** {model.input_shape} | "
+                 f"**Parameters:** {model.count_params():,}")
 
-    return df
+st.markdown("")
 
-
-def update_data(conn, df, changes):
-    """Updates the inventory data in the database."""
-    cursor = conn.cursor()
-
-    if changes["edited_rows"]:
-        deltas = st.session_state.inventory_table["edited_rows"]
-        rows = []
-
-        for i, delta in deltas.items():
-            row_dict = df.iloc[i].to_dict()
-            row_dict.update(delta)
-            rows.append(row_dict)
-
-        cursor.executemany(
-            """
-            UPDATE inventory
-            SET
-                item_name = :item_name,
-                price = :price,
-                units_sold = :units_sold,
-                units_left = :units_left,
-                cost_price = :cost_price,
-                reorder_point = :reorder_point,
-                description = :description
-            WHERE id = :id
-            """,
-            rows,
-        )
-
-    if changes["added_rows"]:
-        cursor.executemany(
-            """
-            INSERT INTO inventory
-                (id, item_name, price, units_sold, units_left, cost_price, reorder_point, description)
-            VALUES
-                (:id, :item_name, :price, :units_sold, :units_left, :cost_price, :reorder_point, :description)
-            """,
-            (defaultdict(lambda: None, row) for row in changes["added_rows"]),
-        )
-
-    if changes["deleted_rows"]:
-        cursor.executemany(
-            "DELETE FROM inventory WHERE id = :id",
-            ({"id": int(df.loc[i, "id"])} for i in changes["deleted_rows"]),
-        )
-
-    conn.commit()
-
-
-# -----------------------------------------------------------------------------
-# Draw the actual page, starting with the inventory table.
-
-# Set the title that appears at the top of the page.
-"""
-# :shopping_bags: Inventory tracker
-
-**Welcome to Alice's Corner Store's intentory tracker!**
-This page reads and writes directly from/to our inventory database.
-"""
-
-st.info(
-    """
-    Use the table below to add, remove, and edit items.
-    And don't forget to commit your changes when you're done.
-    """
+# ─── Upload section ──────────────────────────────────────────────────────────
+st.markdown("### 🔬 Upload Fundus Image(s)")
+st.markdown(
+    "<p style='color:#94a3b8'>Upload one or more retinal fundus images (JPG / PNG / BMP). "
+    "The model will classify each as <b>Glaucoma</b> or <b>Normal</b>.</p>",
+    unsafe_allow_html=True,
 )
 
-# Connect to database and create table if needed
-conn, db_was_just_created = connect_db()
-
-# Initialize data.
-if db_was_just_created:
-    initialize_data(conn)
-    st.toast("Database initialized with some sample data.")
-
-# Load data from database
-df = load_data(conn)
-
-# Display data with editable table
-edited_df = st.data_editor(
-    df,
-    disabled=["id"],  # Don't allow editing the 'id' column.
-    num_rows="dynamic",  # Allow appending/deleting rows.
-    column_config={
-        # Show dollar sign before price columns.
-        "price": st.column_config.NumberColumn(format="$%.2f"),
-        "cost_price": st.column_config.NumberColumn(format="$%.2f"),
-    },
-    key="inventory_table",
+uploaded_files = st.file_uploader(
+    "Drop images here",
+    type=["jpg", "jpeg", "png", "bmp"],
+    accept_multiple_files=True,
+    label_visibility="collapsed",
 )
 
-has_uncommitted_changes = any(len(v) for v in st.session_state.inventory_table.values())
+if not uploaded_files:
+    st.markdown("""
+    <div class="main-card" style="text-align:center;padding:3rem">
+        <div style="font-size:3rem">🏥</div>
+        <h3>No images uploaded yet</h3>
+        <p>Drag and drop retinal fundus photographs above to begin screening.</p>
+        <span class="metric-pill">Accepted formats: JPG · PNG · BMP</span>
+        <span class="metric-pill">Optimal resolution: 256×256 px</span>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    for uploaded_file in uploaded_files:
+        st.markdown("---")
+        img_col, result_col = st.columns([1, 1], gap="large")
 
-st.button(
-    "Commit changes",
-    type="primary",
-    disabled=not has_uncommitted_changes,
-    # Update data in database
-    on_click=update_data,
-    args=(conn, df, st.session_state.inventory_table),
-)
+        pil_img = Image.open(io.BytesIO(uploaded_file.read()))
 
+        with img_col:
+            st.markdown("<div class='main-card'>", unsafe_allow_html=True)
+            st.image(pil_img, caption=uploaded_file.name, use_container_width=True)
+            w, h = pil_img.size
+            st.markdown(
+                f"<span class='metric-pill'>📐 {w}×{h} px</span>"
+                f"<span class='metric-pill'>🗂 {uploaded_file.type}</span>"
+                f"<span class='metric-pill'>💾 {uploaded_file.size/1024:.1f} KB</span>",
+                unsafe_allow_html=True,
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
 
-# -----------------------------------------------------------------------------
-# Now some cool charts
+        with result_col:
+            if model is None:
+                st.markdown("""
+                <div class="main-card" style="text-align:center;padding:2rem">
+                    <div style="font-size:2.5rem">⚠️</div>
+                    <h3>Model not loaded</h3>
+                    <p>Please provide a valid model path in the sidebar.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                with st.spinner("Analysing image…"):
+                    label, conf_g, conf_n = predict(model, pil_img, img_size)
 
-# Add some space
-""
-""
-""
+                is_glaucoma = label == "Glaucoma"
+                card_class = "result-glaucoma" if is_glaucoma else "result-normal"
+                emoji = "🔴" if is_glaucoma else "🟢"
+                conf_pct = conf_g * 100 if is_glaucoma else conf_n * 100
+                bar_color = "#ef4444" if is_glaucoma else "#22c55e"
 
-st.subheader("Units left", divider="red")
+                st.markdown(f"""
+                <div class="{card_class}">
+                    <div style="font-size:3rem">{emoji}</div>
+                    <h2 style="margin:0.4rem 0 0.2rem">{label}</h2>
+                    <p style="font-size:0.9rem;margin:0;color:#e0e0e0">
+                        Confidence: <strong>{conf_pct:.1f}%</strong>
+                    </p>
+                    <div class="conf-track">
+                        <div style="background:{bar_color};height:100%;
+                                    border-radius:999px;width:{conf_pct}%"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
-need_to_reorder = df[df["units_left"] < df["reorder_point"]].loc[:, "item_name"]
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("<div class='main-card'>", unsafe_allow_html=True)
+                st.markdown("**Probability breakdown**")
+                p1, p2 = st.columns(2)
+                p1.metric("🔴 Glaucoma", f"{conf_g*100:.1f}%")
+                p2.metric("🟢 Normal",   f"{conf_n*100:.1f}%")
 
-if len(need_to_reorder) > 0:
-    items = "\n".join(f"* {name}" for name in need_to_reorder)
+                if show_debug:
+                    st.markdown("**Raw softmax output**")
+                    st.code(f"[glaucoma={conf_g:.6f}, normal={conf_n:.6f}]")
+                st.markdown("</div>", unsafe_allow_html=True)
 
-    st.error(f"We're running dangerously low on the items below:\n {items}")
+                if is_glaucoma:
+                    st.error(
+                        "⚠️ **Possible glaucoma detected.** "
+                        "Please refer to an ophthalmologist for a full clinical evaluation."
+                    )
+                else:
+                    st.success(
+                        "✅ **No signs of glaucoma detected.** "
+                        "Continue routine eye check-ups as recommended."
+                    )
 
-""
-""
-
-st.altair_chart(
-    # Layer 1: Bar chart.
-    alt.Chart(df)
-    .mark_bar(
-        orient="horizontal",
-    )
-    .encode(
-        x="units_left",
-        y="item_name",
-    )
-    # Layer 2: Chart showing the reorder point.
-    + alt.Chart(df)
-    .mark_point(
-        shape="diamond",
-        filled=True,
-        size=50,
-        color="salmon",
-        opacity=1,
-    )
-    .encode(
-        x="reorder_point",
-        y="item_name",
-    ),
-    use_container_width=True,
-)
-
-st.caption("NOTE: The :diamonds: location shows the reorder point.")
-
-""
-""
-""
-
-# -----------------------------------------------------------------------------
-
-st.subheader("Best sellers", divider="orange")
-
-""
-""
-
-st.altair_chart(
-    alt.Chart(df)
-    .mark_bar(orient="horizontal")
-    .encode(
-        x="units_sold",
-        y=alt.Y("item_name").sort("-x"),
-    ),
-    use_container_width=True,
+# ─── Footer ──────────────────────────────────────────────────────────────────
+st.divider()
+st.markdown(
+    "<p style='text-align:center;color:#475569;font-size:0.8rem'>"
+    "GlaucomaNet · CNN trained on DRISHTI + RIM-ONE + ACRIMA datasets · "
+    "For research and educational purposes only — not a substitute for professional medical diagnosis."
+    "</p>",
+    unsafe_allow_html=True,
 )
