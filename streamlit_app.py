@@ -121,7 +121,7 @@ Architecture: Custom CNN · Input: 256×256 RGB · Output: Glaucoma / Normal
 
 
 # ─── Model loader (cached) ───────────────────────────────────────────────────
-@st.cache_resource(show_spinner="Loading model weights…")
+'''@st.cache_resource(show_spinner="Loading model weights…")
 def load_cnn_model(path: str):
     """Load the Keras model. Returns (model, error_string)."""
     try:
@@ -133,7 +133,7 @@ def load_cnn_model(path: str):
     except ImportError:
         return None, "TensorFlow is not installed. Run `pip install tensorflow`."
     except Exception as e:
-        return None, str(e)
+        return None, str(e)'''
 
 
 # ─── Prediction helper ───────────────────────────────────────────────────────
