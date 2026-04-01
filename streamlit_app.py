@@ -121,33 +121,32 @@ Architecture: Custom CNN · Input: 256×256 RGB · Output: Glaucoma / Normal
 
 
 # ─── Model loader (cached) ───────────────────────────────────────────────────
-'''@st.cache_resource(show_spinner="Loading model weights…")
-def load_cnn_model(path: str):
-    """Load the Keras model. Returns (model, error_string)."""
-    try:
-        from tensorflow.keras.models import load_model  # type: ignore
-        if not os.path.exists(path):
-            return None, f"File not found: `{path}`"
-        model = load_model(path)
-        return model, None
-    except ImportError:
-        return None, "TensorFlow is not installed. Run `pip install tensorflow`."
-    except Exception as e:
-        return None, str(e)'''
+#@st.cache_resource(show_spinner="Loading model weights…")
+#def load_cnn_model(path: str):
+#    """Load the Keras model. Returns (model, error_string)."""
+#    try:
+#        from tensorflow.keras.models import load_model  # type: ignore
+#        if not os.path.exists(path):
+#            return None, f"File not found: `{path}`"
+#        model = load_model(path)
+#        return model, None
+#    except ImportError:
+#        return None, "TensorFlow is not installed. Run `pip install tensorflow`."
+#    except Exception as e:
+#        return None, str(e)'''
 
 
 # ─── Prediction helper ───────────────────────────────────────────────────────
-def predict(model, pil_image: Image.Image, target_size: int):
-    """Return (label, confidence_glaucoma, confidence_normal)."""
-    from tensorflow.keras.preprocessing.image import img_to_array  # type: ignore
-    img = pil_image.convert("RGB").resize((target_size, target_size))
-    arr = img_to_array(img) / 255.0
-    arr = np.expand_dims(arr, axis=0)
-    probs = model.predict(arr, verbose=0)[0]   # shape: (2,)
-    label_idx = int(np.argmax(probs))
+#def predict(model, pil_image: Image.Image, target_size: int):
+#    """Return (label, confidence_glaucoma, confidence_normal)."""
+ #   from tensorflow.keras.preprocessing.image import img_to_array  # type: ignore
+  ## arr = img_to_array(img) / 255.0
+  #  arr = np.expand_dims(arr, axis=0)
+  #  probs = model.predict(arr, verbose=0)[0]   # shape: (2,)
+  #  label_idx = int(np.argmax(probs))
     # Class order from ImageDataGenerator (alphabetical): glaucoma=0, normal=1
-    labels = ["Glaucoma", "Normal"]
-    return labels[label_idx], float(probs[0]), float(probs[1])
+  #  labels = ["Glaucoma", "Normal"]
+  #  return labels[label_idx], float(probs[0]), float(probs[1])'''
 
 
 # ─── Header ──────────────────────────────────────────────────────────────────
@@ -164,20 +163,20 @@ with col_title:
 st.divider()
 
 # ─── Load model ──────────────────────────────────────────────────────────────
-model, model_err = load_cnn_model(model_path)
+#model, model_err = load_cnn_model(model_path)
 
-if model_err:
-    st.warning(f"⚠️ Model not loaded — {model_err}")
-    st.info(
-        "Place your `combine_cnn.h5` file in the same directory as this script, "
-        "or adjust the path in the sidebar. The UI is fully functional once the model is loaded."
-    )
-    model = None
-else:
-    st.success("✅ Model loaded successfully")
-    if show_debug:
-        st.write(f"**Input shape:** {model.input_shape} | "
-                 f"**Parameters:** {model.count_params():,}")
+#if model_err:
+#    st.warning(f"⚠️ Model not loaded — {model_err}")
+#    st.info(
+#        "Place your `combine_cnn.h5` file in the same directory as this script, "
+#        "or adjust the path in the sidebar. The UI is fully functional once the model is loaded."
+#    )
+#    model = None
+#else:
+#    st.success("✅ Model loaded successfully")
+#    if show_debug:
+#        st.write(f"**Input shape:** {model.input_shape} | "
+#                 f"**Parameters:** {model.count_params():,}")
 
 st.markdown("")
 
